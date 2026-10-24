@@ -68,6 +68,10 @@ td:last-child{border-right:1px solid var(--line);border-radius:0 10px 10px 0}
 table.edit td.cell{cursor:pointer}
 table.edit td.cell:hover{outline:2px solid var(--gold);outline-offset:-2px}
 .hint{color:var(--sub);font-size:15px;margin-top:6px}
+.pick{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.pick button{background:transparent;border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:8px 16px;font-size:16px;min-height:42px;cursor:pointer}
+.pick button.on{background:var(--gold);color:var(--on-gold);border-color:var(--gold)}
+table.only th.c:not(.sel), table.only td.cell:not(.sel){display:none}
 .edrow{display:flex;gap:6px;align-items:center;justify-content:center}
 .edrow .in{width:4.2em;font-size:22px;padding:6px 6px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);text-align:center;font-family:inherit;min-height:44px}
 .edrow .in.re{width:3.8em;font-size:18px}
@@ -86,7 +90,9 @@ table.edit td.cell:hover{outline:2px solid var(--gold);outline-offset:-2px}
 .row .ok{background:var(--pass);color:#fff;border:none}
 .row .no{background:var(--fail);color:#fff;border:none}
 .row .warn{color:var(--fail)}
-@media (max-width:760px){main{grid-template-columns:1fr}.summary{grid-template-columns:1fr}}
+@media (max-width:760px){main{grid-template-columns:1fr}.summary{grid-template-columns:1fr}
+  body.editing .panel, body.editing .summary{display:none}
+  header h1{font-size:20px} header .date{display:none}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -111,6 +117,7 @@ table.edit td.cell:hover{outline:2px solid var(--gold);outline-offset:-2px}
   </section>
   <section>
     <div class="summary" id="summary"></div>
+    <div class="pick" id="pick" aria-label="보여줄 시험"></div>
     <div class="wrap"><table id="board"><thead></thead><tbody></tbody></table></div>
     <div class="hint" id="hint"></div>
   </section>
@@ -216,16 +223,31 @@ function renderClock() {
   }).join("");
 }
 
+// 휴대폰처럼 좁은 화면에서는 시험 하나씩 골라 입력한다
+let focusI = window.innerWidth < 760 ? 0 : -1;
+function renderPick() {
+  const opts = [...TESTS.map((t, i) => [i, t.name.replace("7과 ", "").replace(" TEST", "")]), [-1, "전체"]];
+  $("pick").innerHTML = opts.map(([i, l]) =>
+    `<button type="button" data-p="${i}" class="${focusI === i ? "on" : ""}">${l}</button>`).join("");
+}
+$("pick").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-p]");
+  if (b) { focusI = Number(b.dataset.p); render(); }
+});
+
 function render() {
   renderClock();
+  renderPick();
+  const sel = (i) => (focusI === i ? " sel" : "");
   document.querySelector("#board thead").innerHTML =
-    `<tr><th>이름</th>${TESTS.map((t, i) => `<th>${t.name}<br><small>${state.cut[i]}점 통과</small></th>`).join("")}</tr>`;
-  $("board").className = edit ? "edit" : "";
+    `<tr><th>이름</th>${TESTS.map((t, i) => `<th class="c${sel(i)}">${t.name}<br><small>${state.cut[i]}점 통과</small></th>`).join("")}</tr>`;
+  $("board").className = (edit ? "edit" : "") + (focusI >= 0 ? " only" : "");
+  document.body.classList.toggle("editing", edit);
   document.querySelector("#board tbody").innerHTML = state.roster.map((n) => {
     const cells = TESTS.map((t, i) => {
-      if (!edit) return `<td class="cell" data-n="${n}" data-i="${i}">${badge(n, i)}</td>`;
+      if (!edit) return `<td class="cell${sel(i)}" data-n="${n}" data-i="${i}">${badge(n, i)}</td>`;
       const r = (state.res[n] || {})[t.id] || {};
-      return `<td class="cell ed" data-n="${n}" data-i="${i}"><div class="edrow">` +
+      return `<td class="cell ed${sel(i)}" data-n="${n}" data-i="${i}"><div class="edrow">` +
         `<input class="in" data-n="${n}" data-i="${i}" data-f="score" type="number" inputmode="numeric" min="0" max="100" placeholder="점수" value="${r.score ?? ""}" aria-label="${n} ${t.name} 점수">` +
         `<input class="in re" data-n="${n}" data-i="${i}" data-f="retest" type="number" inputmode="numeric" min="0" max="100" placeholder="재시" value="${r.retest ?? ""}" aria-label="${n} ${t.name} 재시 점수">` +
         `<span class="live" data-n="${n}" data-i="${i}">${badge(n, i, true)}</span></div></td>`;
@@ -309,6 +331,44 @@ async function relay(n, i, rec) {
     $("sync").textContent = "시스템 전송 실패 — 인터넷 확인"; $("sync").className = "sync bad";
   }
 }
+// 다른 기기(휴대폰 · 태블릿)에서 넣은 결과를 받아 이 화면에 반영 — 처음 열면 오늘 기록 전체를 다시 받는다
+const seenEv = new Set();
+let since = "12h";
+function applyRemote(m) {
+  const n = typeof m.k === "number" ? DEFAULT_ROSTER[m.k] : m.k;
+  const i = TESTS.findIndex((t) => t.id === m.id);
+  if (!n || i < 0) return;
+  if (m.x) {
+    const mine = { ...(state.res[n] || {}) }; delete mine[TESTS[i].id];
+    state = { ...state, res: { ...state.res, [n]: mine } };
+  } else {
+    const rec = { score: m.s ?? "", retest: m.r ?? "" };
+    if (m.f) rec.force = m.f;
+    setRec(n, i, rec);
+  }
+}
+async function pull() {
+  try {
+    const t = await (await fetch(`${RELAY}/json?poll=1&since=${since}`, { cache: "no-store" })).text();
+    let changed = false;
+    t.split("\n").filter(Boolean).forEach((ln) => {
+      const ev = JSON.parse(ln);
+      if (ev.event !== "message" || seenEv.has(ev.id)) return;
+      seenEv.add(ev.id); since = ev.id;
+      try { applyRemote(JSON.parse(ev.message)); changed = true; } catch (e) { /* 형식이 다른 메시지는 건너뜀 */ }
+    });
+    if (changed) {
+      write(KEY, JSON.stringify(state));
+      const typing = document.activeElement && document.activeElement.classList.contains("in");
+      if (typing) renderSummary(); else render();
+    }
+    $("sync").textContent = `연동 중 ✓ ${new Date().toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" })}`;
+    $("sync").className = "sync ok";
+  } catch (e) {
+    $("sync").textContent = "연동 끊김 — 인터넷 확인"; $("sync").className = "sync bad";
+  }
+}
+
 function put(extra) {
   const id = TESTS[cur.i].id;
   const rec = { score: $("dScore").value, retest: $("dRetest").value, ...extra };
@@ -367,6 +427,7 @@ $("sReset").onclick = () => {
 
 render();
 setInterval(() => { if (edit) renderClock(); else render(); }, 20000);
+pull(); setInterval(pull, 3000);
 </script>
 
 </body>
