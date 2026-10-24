@@ -76,7 +76,11 @@ table.edit td.cell:hover{outline:2px solid var(--gold);outline-offset:-2px}
 table.only th.c:not(.sel), table.only td.cell:not(.sel){display:none}
 .edrow{display:flex;gap:6px;align-items:center;justify-content:center}
 .edrow .in{width:4.2em;font-size:22px;padding:6px 6px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);text-align:center;font-family:inherit;min-height:44px}
-.edrow .in.re{width:3.8em;font-size:18px}
+.edrow .in.re,.edrow .in.fx{width:4.6em;font-size:17px}
+.edrow .allok{background:var(--pass-bg);color:var(--pass);border:1px solid var(--pass);border-radius:8px;padding:6px 8px;font-size:15px;font-weight:800;min-height:44px;cursor:pointer;white-space:nowrap}
+.badge.rp{background:var(--pass-bg);color:var(--pass);outline:2px solid var(--pass)}
+.badge.rf{background:var(--fail-bg);color:var(--fail);outline:2px solid var(--fail)}
+.badge.x{background:var(--fail-bg);color:var(--fail);outline:2px dashed var(--fail)}
 .edrow .live{cursor:pointer}
 .edrow .badge{min-width:76px}
 /* 입력 창 (페이지 안에 그리는 창 — 알림창은 쓰지 않는다) */
@@ -110,6 +114,7 @@ table.only th.c:not(.sel), table.only td.cell:not(.sel){display:none}
     <button id="modeBtn" type="button">입력 모드</button>
     <button id="themeBtn" type="button">밝게</button>
     <button id="setBtn" type="button">설정</button>
+    <button id="copyBtn" type="button">결과 복사</button>
   </div>
   <span class="sync" id="sync">시스템 연동 대기</span>
 </header>
@@ -200,26 +205,52 @@ const has = (v) => v !== "" && v != null;
 
 // 원장 기준(10/24): 80점 이상 통과 · 60~79점 틀린 문항만 재시 · 60점 미만 전체 재시
 const FULL_CUT = 60;
-const TIER = { p: "통과", h: "틀린 문항 재시", f: "전체 재시" };
+const TIER = { p: "통과", h: "틀린 문항 재시", f: "전체 재시", rp: "재시 통과", rf: "재시 불통" };
 const tierOf = (score, cut) => (score >= cut ? "p" : score >= FULL_CUT ? "h" : "f");
+const okScore = (v) => has(v) && /^\d{1,3}$/.test(String(v).trim()) && Number(v) <= 100;
+const okCount = (v) => has(v) && /^\d{1,3}$/.test(String(v).trim());
+const PASSED = (t) => t === "p" || t === "rp";
+// 판정 순서: 본시험 점수 → (60점 미만) 전체 재시 점수 / (60~79점) 틀린 문항 재시 결과 → 감독 판정이 있으면 그것이 우선
 function status(name, i) {
   const r = (state.res[name] || {})[TESTS[i].id];
   if (!r) return null;
   const cut = Number(state.cut[i]);
-  let tier = null;
-  if (r.force) tier = r.force === "p" ? "p" : (r.force === "h" ? "h" : "f");
-  else if (has(r.retest)) tier = tierOf(Number(r.retest), cut);
-  else if (has(r.score)) tier = tierOf(Number(r.score), cut);
+  let first = null, tier = null;
+  if (has(r.score)) first = okScore(r.score) ? tierOf(Number(r.score), cut) : "x";
+  tier = first;
+  if (first === "f" && has(r.retest)) tier = !okScore(r.retest) ? "x" : (Number(r.retest) >= cut ? "rp" : "rf");
+  if (first === "h" && has(r.fix)) tier = !okCount(r.fix) ? "x" : (Number(r.fix) === 0 ? "rp" : "rf");
+  if (r.force) tier = r.force;
   if (!tier) return null;
-  return { tier, pass: tier === "p", r, re: has(r.retest) };
+  return { tier, first, pass: PASSED(tier), r };
+}
+// 화면 · 시스템 오픈메모에 같이 쓰는 설명 — 「72점 → 틀린 문항 재시 다 맞음 · 재시 통과」
+function desc(n, i) {
+  const s = status(n, i);
+  if (!s || s.tier === "x") return "";
+  const r = s.r, parts = [];
+  if (has(r.score)) parts.push(`${r.score}점`);
+  if (s.first === "f" && has(r.retest)) parts.push(`전체 재시 ${r.retest}점`);
+  if (s.first === "h" && has(r.fix)) parts.push(Number(r.fix) === 0 ? "틀린 문항 재시 다 맞음" : `틀린 문항 재시 ${r.fix}개 또 틀림`);
+  return `${parts.join(" → ")} · ${TIER[s.tier]}${r.force ? " (감독 판정)" : ""}`;
 }
 
 function badge(n, i, short) {
   const s = status(n, i);
   if (!s) return `<span class="badge w">${short ? "—" : "대기"}</span>`;
-  const sc = has(s.r.score) ? `${s.r.score}점` : "";
-  const re = s.re ? ` → 재시 ${s.r.retest}점` : "";
-  return `<span class="badge ${s.tier}">${TIER[s.tier]}${short ? "" : ` <small>${sc}${re}</small>`}</span>`;
+  if (s.tier === "x") return `<span class="badge x">점수 확인</span>`;
+  const d = desc(n, i).split(" · ")[0];
+  return `<span class="badge ${s.tier}">${TIER[s.tier]}${short ? "" : ` <small>${d}</small>`}</span>`;
+}
+// 칸 안에서 보일 입력 — 본시험 60점 미만이면 전체 재시 점수, 60~79점이면 다 맞음 / 또 틀린 개수
+function showExtras(n, i) {
+  const r = cellRec(n, i), cut = Number(state.cut[i]);
+  const first = has(r.score) && okScore(r.score) ? tierOf(Number(r.score), cut) : null;
+  const q = (f) => document.querySelector(`input[data-n="${n}"][data-i="${i}"][data-f="${f}"]`);
+  const re = q("retest"), fx = q("fix"), ok = document.querySelector(`.allok[data-n="${n}"][data-i="${i}"]`);
+  if (re) re.hidden = first !== "f";
+  if (fx) fx.hidden = first !== "h";
+  if (ok) ok.hidden = first !== "h";
 }
 
 function renderClock() {
@@ -259,26 +290,32 @@ function render() {
       const r = (state.res[n] || {})[t.id] || {};
       return `<td class="cell ed${sel(i)}" data-n="${n}" data-i="${i}"><div class="edrow">` +
         `<input class="in" data-n="${n}" data-i="${i}" data-f="score" type="number" inputmode="numeric" min="0" max="100" placeholder="점수" value="${r.score ?? ""}" aria-label="${n} ${t.name} 점수">` +
-        `<input class="in re" data-n="${n}" data-i="${i}" data-f="retest" type="number" inputmode="numeric" min="0" max="100" placeholder="재시" value="${r.retest ?? ""}" aria-label="${n} ${t.name} 재시 점수">` +
+        `<input class="in re" data-n="${n}" data-i="${i}" data-f="retest" type="number" inputmode="numeric" min="0" max="100" placeholder="재시점수" value="${r.retest ?? ""}" aria-label="${n} ${t.name} 전체 재시 점수">` +
+        `<button type="button" class="allok" data-n="${n}" data-i="${i}">다 맞음</button>` +
+        `<input class="in fx" data-n="${n}" data-i="${i}" data-f="fix" type="number" inputmode="numeric" min="0" placeholder="또 틀림" value="${r.fix ?? ""}" aria-label="${n} ${t.name} 틀린 문항 재시에서 또 틀린 개수">` +
         `<span class="live" data-n="${n}" data-i="${i}">${badge(n, i, true)}</span></div></td>`;
     }).join("");
     return `<tr><td>${n}</td>${cells}</tr>`;
   }).join("");
+  if (edit) state.roster.forEach((n) => TESTS.forEach((_, i) => showExtras(n, i)));
   renderSummary();
 }
 
 function renderSummary() {
   $("summary").innerHTML = TESTS.map((t, i) => {
-    let p = 0, f = 0;
-    let h = 0;
-    state.roster.forEach((n) => { const s = status(n, i); if (s) { if (s.tier === "p") p++; else if (s.tier === "h") h++; else f++; } });
-    return `<div class="sum"><div class="k">${t.name}</div><div class="v"><span class="p">통과 ${p}</span> · <span class="h">틀린 문항 재시 ${h}</span> · <span class="f">전체 재시 ${f}</span> <span class="n">/ ${state.roster.length}명</span></div></div>`;
+    let p = 0, h = 0, f = 0, rf = 0;
+    state.roster.forEach((n) => {
+      const s = status(n, i);
+      if (!s) return;
+      if (PASSED(s.tier)) p++; else if (s.tier === "h") h++; else if (s.tier === "f") f++; else if (s.tier === "rf") rf++;
+    });
+    return `<div class="sum"><div class="k">${t.name}</div><div class="v"><span class="p">통과 ${p}</span> · <span class="h">틀린 문항 재시 ${h}</span> · <span class="f">전체 재시 ${f}</span>${rf ? ` · <span class="f">재시 불통 ${rf}</span>` : ""} <span class="n">/ ${state.roster.length}명</span></div></div>`;
   }).join("");
 
   $("modeBtn").textContent = edit ? "입력 끝내기" : "입력 모드";
   $("modeBtn").classList.toggle("on", edit);
   $("hint").textContent = edit
-    ? "점수를 넣으면 바로 뜹니다 — 80점 이상 통과 · 60~79점 틀린 문항 재시 · 60점 미만 전체 재시. 재시 점수는 「재시」 칸에, 판정 표시를 누르면 직접 바꿀 수 있습니다."
+    ? "본시험 점수를 넣으면 바로 판정됩니다. 60점 미만 → 「재시점수」 칸에 전체 재시 점수(80점 이상 재시 통과). 60~79점 → 틀린 문항만 다시 보고 다 맞으면 「다 맞음」(재시 통과), 또 틀리면 「또 틀림」에 개수(재시 불통). 판정 표시를 누르면 감독이 직접 정할 수 있습니다."
     : "80점 이상 통과 · 60~79점 틀린 문항만 재시 · 60점 미만 전체 재시 — 재시는 매시 30분 (8:30 · 9:30)";
 }
 
@@ -295,7 +332,23 @@ document.addEventListener("input", (e) => {
   delete rec.force;
   setRec(n, i, rec);
   document.querySelector(`.live[data-n="${n}"][data-i="${i}"]`).innerHTML = badge(n, i, true);
+  showExtras(n, i);
   renderSummary();
+});
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button.allok");
+  if (!b) return;
+  const n = b.dataset.n, i = Number(b.dataset.i);
+  const rec = { ...cellRec(n, i), fix: "0" };
+  delete rec.force;
+  setRec(n, i, rec);
+  const fx = document.querySelector(`input[data-n="${n}"][data-i="${i}"][data-f="fix"]`);
+  if (fx) fx.value = "0";
+  document.querySelector(`.live[data-n="${n}"][data-i="${i}"]`).innerHTML = badge(n, i, true);
+  showExtras(n, i);
+  renderSummary();
+  write(KEY, JSON.stringify(state));
+  relay(n, i, cellRec(n, i));
 });
 document.addEventListener("change", (e) => {
   const el = e.target.closest("input.in");
@@ -332,16 +385,25 @@ $("board").addEventListener("keydown", (e) => {
 const RELAY = "https://ntfy.sh/daol105-g9sat-q7k2m9x4v1";
 async function relay(n, i, rec) {
   const k = DEFAULT_ROSTER.indexOf(n);
-  const body = JSON.stringify({ k: k >= 0 ? k : n, id: TESTS[i].id, s: rec ? rec.score : "", r: rec ? rec.retest : "",
-    f: rec ? (rec.force || "") : "", c: state.cut[i], x: rec ? 0 : 1,
-    v: rec && status(n, i) ? TIER[status(n, i).tier] : "" });
-  try {
-    const res = await fetch(RELAY, { method: "POST", body });
-    $("sync").textContent = res.ok ? `시스템 전송 ✓ ${new Date().toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" })}` : "시스템 전송 실패";
-    $("sync").className = "sync " + (res.ok ? "ok" : "bad");
-  } catch (e) {
-    $("sync").textContent = "시스템 전송 실패 — 인터넷 확인"; $("sync").className = "sync bad";
+  const st = rec ? status(n, i) : null;
+  if (st && st.tier === "x") { $("sync").textContent = `${n} 점수를 확인해 주세요 (0~100)`; $("sync").className = "sync bad"; return; }
+  const body = JSON.stringify({ k: k >= 0 ? k : n, id: TESTS[i].id, s: rec ? (rec.score ?? "") : "", r: rec ? (rec.retest ?? "") : "",
+    z: rec ? (rec.fix ?? "") : "", f: rec ? (rec.force || "") : "", c: state.cut[i], x: st ? 0 : 1,
+    v: st ? TIER[st.tier] : "", d: st ? desc(n, i) : "" });
+  // 요청이 몰리면 연동 통로가 잠깐 막는다(429) — 3초 · 6초 · 12초 … 기다렸다 다시 보낸다
+  for (let k = 0, wait = 3000; k < 6; k++, wait *= 2) {
+    try {
+      const res = await fetch(RELAY, { method: "POST", body });
+      if (res.ok) {
+        $("sync").textContent = `시스템 전송 ✓ ${new Date().toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" })}`;
+        $("sync").className = "sync ok";
+        return;
+      }
+    } catch (e) { /* 인터넷이 끊겼으면 아래에서 다시 시도 */ }
+    $("sync").textContent = `전송 대기 중 — ${n} 다시 보내는 중`; $("sync").className = "sync bad";
+    await new Promise((r) => setTimeout(r, wait));
   }
+  $("sync").textContent = `⚠ ${n} 시스템 전송 실패 — 그 칸을 한 번 더 입력해 주세요`; $("sync").className = "sync bad";
 }
 // 다른 기기(휴대폰 · 태블릿)에서 넣은 결과를 받아 이 화면에 반영 — 처음 열면 오늘 기록 전체를 다시 받는다
 const seenEv = new Set();
@@ -354,7 +416,7 @@ function applyRemote(m) {
     const mine = { ...(state.res[n] || {}) }; delete mine[TESTS[i].id];
     state = { ...state, res: { ...state.res, [n]: mine } };
   } else {
-    const rec = { score: m.s ?? "", retest: m.r ?? "" };
+    const rec = { score: m.s ?? "", retest: m.r ?? "", fix: m.z ?? "" };
     if (m.f) rec.force = m.f;
     setRec(n, i, rec);
   }
@@ -383,7 +445,8 @@ async function pull() {
 
 function put(extra) {
   const id = TESTS[cur.i].id;
-  const rec = { score: $("dScore").value, retest: $("dRetest").value, ...extra };
+  const rec = { ...cellRec(cur.n, cur.i), score: $("dScore").value, retest: $("dRetest").value, ...extra };
+  if (!extra.force) delete rec.force;
   state = { ...state, res: { ...state.res, [cur.n]: { ...(state.res[cur.n] || {}), [id]: rec } } };
   $("dlg").hidden = true; save(); relay(cur.n, cur.i, rec);
 }
@@ -438,9 +501,46 @@ $("sReset").onclick = () => {
   state = { ...state, res: {} }; $("settings").hidden = true; save();
 };
 
+// 연동이 끊겼을 때 — 결과 전체를 글로 복사해 Claude 에게 붙여 넣으면 시스템에 한 번에 넣는다
+function resultText() {
+  const lines = [`[중3 토요일 TEST 결과 ${new Date().toLocaleString("ko-KR")}]`];
+  state.roster.forEach((n) => {
+    const parts = TESTS.map((t, i) => { const d = desc(n, i); return d ? `${t.name.replace("7과 ", "").replace(" TEST", "")} ${d}` : ""; }).filter(Boolean);
+    if (parts.length) lines.push(`${n} : ${parts.join(" / ")}`);
+  });
+  return lines.join("\n");
+}
+$("copyBtn").onclick = async () => {
+  const txt = resultText();
+  try { await navigator.clipboard.writeText(txt); $("copyBtn").textContent = "복사됨 ✓"; }
+  catch (e) {
+    $("sRoster").value = txt; $("settings").hidden = false; $("sRoster").select();
+    $("copyBtn").textContent = "길게 눌러 복사";
+  }
+  setTimeout(() => { $("copyBtn").textContent = "결과 복사"; }, 3000);
+};
+
 render();
 setInterval(() => { if (edit) renderClock(); else render(); }, 20000);
-pull(); setInterval(pull, 3000);
+// 연결 하나를 열어 두고 새 결과를 밀어 받는다(3초마다 묻지 않아 요청 제한에 걸리지 않는다). 끊기면 브라우저가 다시 잇는다
+function onEvent(ev) {
+  if (ev.event !== "message" || seenEv.has(ev.id)) return false;
+  seenEv.add(ev.id); since = ev.id;
+  try { applyRemote(JSON.parse(ev.message)); return true; } catch (e) { return false; }
+}
+function afterRemote() {
+  write(KEY, JSON.stringify(state));
+  const typing = document.activeElement && document.activeElement.classList.contains("in");
+  if (typing) renderSummary(); else render();
+}
+if ("EventSource" in window) {
+  const es = new EventSource(`${RELAY}/sse?since=12h`);
+  es.onmessage = (m) => { try { if (onEvent(JSON.parse(m.data))) afterRemote(); } catch (e) { /* 무시 */ } };
+  es.onopen = () => { $("sync").textContent = "연동 중 ✓"; $("sync").className = "sync ok"; };
+  es.onerror = () => { $("sync").textContent = "연동 다시 잇는 중…"; $("sync").className = "sync bad"; };
+} else {
+  pull(); setInterval(pull, 20000);
+}
 </script>
 
 </body>
