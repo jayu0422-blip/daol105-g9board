@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>중3 토요일 TEST 보드</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* 레이아웃: 왼쪽 오늘 순서(시각 강조) · 오른쪽 학생별 통과/불통 표 — 프로젝터 거리에서 읽히는 큰 글씨 */
+:root{
+  --bg:#0f1b2d; --panel:#16263d; --line:#25395a; --ink:#f3f1ea; --sub:#9fb0c8;
+  --gold:#d9b25f; --on-gold:#14213a; --pass:#2fbf71; --pass-bg:#123a28; --fail:#ff6b6b; --fail-bg:#3d1a1f;
+  --wait:#6b7f9c; --scrim:rgba(0,0,0,.55);
+  color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:#f5f2ea; --panel:#ffffff; --line:#dcd3c1; --ink:#1b2a41; --sub:#5f6a7d;
+  --gold:#9a6f1c; --on-gold:#ffffff; --pass:#157a43; --pass-bg:#dcf1e3; --fail:#b9282b; --fail-bg:#f9dede;
+  --wait:#8f98a6; --scrim:rgba(0,0,0,.35);
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+.sync{font-size:14px;color:var(--sub)}
+.sync.ok{color:var(--pass)} .sync.bad{color:var(--fail)}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Pretendard","Noto Sans KR","Malgun Gothic",sans-serif;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:12px 18px;padding-block:14px;border-bottom:2px solid var(--line)}
+header h1{margin:0;font-size:clamp(22px,2.6vw,34px);letter-spacing:-.5px}
+header .date{color:var(--sub);font-size:clamp(15px,1.5vw,20px)}
+header .clock{margin-left:auto;font-size:clamp(28px,3.6vw,46px);font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums}
+header .btns{display:flex;gap:8px;flex-wrap:wrap}
+button{font-family:inherit}
+header button{background:transparent;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px 14px;font-size:16px;cursor:pointer;min-height:44px}
+header button.on{background:var(--gold);color:var(--on-gold);border-color:var(--gold)}
+button:focus-visible,td.cell:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+main{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:18px;padding-block:16px}
+main>section{min-width:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+.panel h2{margin:0 0 8px;font-size:18px;color:var(--gold)}
+.tl{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.tl li{display:flex;gap:12px;padding:9px 10px;border-radius:10px;font-size:18px;align-items:baseline}
+.tl li .t{min-width:56px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--sub)}
+.tl li.done{opacity:.4}
+.tl li.now{background:var(--gold);color:var(--on-gold)}
+.tl li.now .t{color:var(--on-gold)}
+.tl small{display:block;font-size:13px;opacity:.85}
+.summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:10px}
+.sum{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.sum .k{font-size:15px;color:var(--sub)}
+.sum .v{font-size:clamp(20px,2.3vw,30px);font-weight:800;margin-top:2px}
+.sum .p{color:var(--pass)} .sum .f{color:var(--fail)} .sum .n{font-size:15px;color:var(--sub);font-weight:600}
+.wrap{overflow-x:auto}
+table{width:100%;border-collapse:separate;border-spacing:0 5px}
+th{font-size:15px;color:var(--sub);text-align:center;font-weight:700;padding:0 6px}
+th:first-child{text-align:left}
+th small{font-weight:600}
+td{background:var(--panel);padding:5px 6px;text-align:center;font-size:20px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+td:first-child{text-align:left;font-weight:800;border-left:1px solid var(--line);border-radius:10px 0 0 10px;padding-left:14px;font-size:clamp(18px,2vw,24px);white-space:nowrap}
+td:last-child{border-right:1px solid var(--line);border-radius:0 10px 10px 0}
+.badge{display:inline-flex;align-items:baseline;gap:6px;min-width:110px;justify-content:center;padding:4px 10px;border-radius:999px;font-weight:800;font-size:clamp(16px,1.7vw,20px)}
+.badge.p{background:var(--pass-bg);color:var(--pass)}
+.badge.f{background:var(--fail-bg);color:var(--fail)}
+.badge.w{color:var(--wait)}
+.badge small{font-weight:600;font-size:14px;opacity:.9}
+table.edit td.cell{cursor:pointer}
+table.edit td.cell:hover{outline:2px solid var(--gold);outline-offset:-2px}
+.hint{color:var(--sub);font-size:15px;margin-top:6px}
+/* 입력 창 (페이지 안에 그리는 창 — 알림창은 쓰지 않는다) */
+.modal{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
+.card{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:16px;padding:20px;width:min(440px,100%)}
+.card h3{margin:0 0 4px;font-size:24px}
+.card p{margin:0 0 10px;color:var(--sub)}
+.card label{display:block;font-size:15px;color:var(--sub);margin:10px 0 4px}
+.card input,.card textarea{width:100%;font-size:26px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font-family:inherit}
+.card textarea{font-size:17px;height:180px}
+.row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.row button{flex:1;font-size:18px;min-height:50px;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+.row .ok{background:var(--pass);color:#fff;border:none}
+.row .no{background:var(--fail);color:#fff;border:none}
+.row .warn{color:var(--fail)}
+@media (max-width:760px){main{grid-template-columns:1fr}.summary{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+
+<header>
+  <h1>중3 토요일 · 7과 TEST</h1>
+  <span class="date" id="date"></span>
+  <span class="clock" id="clock"></span>
+  <div class="btns">
+    <button id="modeBtn" type="button">입력 모드</button>
+    <button id="themeBtn" type="button">밝게</button>
+    <button id="setBtn" type="button">설정</button>
+  </div>
+  <span class="sync" id="sync">시스템 연동 대기</span>
+</header>
+<main>
+  <section class="panel" aria-label="오늘 순서">
+    <h2>오늘 순서</h2>
+    <ul class="tl" id="tl"></ul>
+  </section>
+  <section>
+    <div class="summary" id="summary"></div>
+    <div class="wrap"><table id="board"><thead></thead><tbody></tbody></table></div>
+    <div class="hint" id="hint"></div>
+  </section>
+</main>
+
+<div class="modal" id="dlg" hidden>
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="dTitle">
+    <h3 id="dTitle"></h3>
+    <p id="dSub"></p>
+    <label for="dScore">점수 (기준 <span id="dCut"></span>점 이상 통과)</label>
+    <input id="dScore" type="number" inputmode="numeric" min="0" max="100">
+    <label for="dRetest">재시 점수 (있을 때만)</label>
+    <input id="dRetest" type="number" inputmode="numeric" min="0" max="100">
+    <div class="row">
+      <button class="ok" id="dPass" type="button">통과로 표시</button>
+      <button class="no" id="dFail" type="button">불통으로 표시</button>
+    </div>
+    <div class="row">
+      <button id="dClear" type="button">비우기</button>
+      <button id="dCancel" type="button">닫기</button>
+      <button class="ok" id="dSave" type="button">저장</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="settings" hidden>
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="sTitle">
+    <h3 id="sTitle">설정</h3>
+    <label for="sRoster">학생 명단 (한 줄에 한 명)</label>
+    <textarea id="sRoster"></textarea>
+    <label for="sCut">통과 기준 점수 — 영작 · 워크북1 · 워크북2</label>
+    <input id="sCut" type="text">
+    <div class="row">
+      <button class="warn" id="sReset" type="button">결과 전부 지우기</button>
+      <button id="sCancel" type="button">닫기</button>
+      <button class="ok" id="sSave" type="button">저장</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const KEY = "daol105_g9_sat_20261024";
+const TESTS = [
+  { id: "eng", name: "7과 영작 TEST" },
+  { id: "wb1", name: "7과 워크북1 TEST" },
+  { id: "wb2", name: "7과 워크북2 TEST" },
+];
+const TIMELINE = [
+  ["16:00", "16:20", "7과 영작 TEST", "20분"],
+  ["16:20", "16:40", "7과 워크북1 TEST", "20분"],
+  ["16:40", "17:00", "7과 워크북2 TEST", "20분"],
+  ["17:00", "17:20", "고등서술형 2과 워크북", "변경반 합류"],
+  ["17:20", "18:00", "채점 → 상세해설서 보고 질답", "모르는 문항 질문"],
+  ["18:30", "18:50", "재시", "매시 30분"],
+  ["19:30", "19:50", "재시", "매시 30분"],
+  ["20:30", "20:50", "재시", "매시 30분"],
+  ["21:30", "21:50", "재시", "매시 30분"],
+];
+const DEFAULT_ROSTER = ["김서율", "김서하", "김영경", "박세현", "선예진", "신하람", "오재원", "우채원",
+  "이효인", "임주원", "정기훈", "최아인", "최정원", "최주원"];
+
+const read = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const write = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* 저장이 막힌 환경 — 화면은 그대로 동작 */ } };
+const load = () => { try { return JSON.parse(read(KEY)) || null; } catch (e) { return null; } };
+
+let state = load() || { roster: DEFAULT_ROSTER, cut: [80, 80, 80], res: {} };
+let edit = false;
+let cur = null;
+let resetArmed = false;
+const $ = (id) => document.getElementById(id);
+
+function save() { write(KEY, JSON.stringify(state)); render(); }
+window.addEventListener("storage", (e) => { if (e.key === KEY) { state = load() || state; render(); } });
+
+const hm = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
+const disp = (s) => { const [h, m] = s.split(":").map(Number); return `${h > 12 ? h - 12 : h}:${String(m).padStart(2, "0")}`; };
+const has = (v) => v !== "" && v != null;
+
+function status(name, i) {
+  const r = (state.res[name] || {})[TESTS[i].id];
+  if (!r) return null;
+  const cut = Number(state.cut[i]);
+  if (r.force) return { pass: r.force === "p", r, re: has(r.retest) };
+  if (has(r.retest)) return { pass: Number(r.retest) >= cut, r, re: true };
+  if (has(r.score)) return { pass: Number(r.score) >= cut, r };
+  return null;
+}
+
+function render() {
+  const now = new Date();
+  const mins = now.getHours() * 60 + now.getMinutes();
+  $("clock").textContent = now.toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" });
+  $("date").textContent = now.toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" });
+
+  $("tl").innerHTML = TIMELINE.map(([a, b, t, n]) => {
+    const cls = mins >= hm(b) ? "done" : (mins >= hm(a) ? "now" : "");
+    return `<li class="${cls}"><span class="t">${disp(a)}</span><span>${t}<small>${disp(a)}~${disp(b)} · ${n}</small></span></li>`;
+  }).join("");
+
+  document.querySelector("#board thead").innerHTML =
+    `<tr><th>이름</th>${TESTS.map((t, i) => `<th>${t.name}<br><small>${state.cut[i]}점 통과</small></th>`).join("")}</tr>`;
+  $("board").className = edit ? "edit" : "";
+  document.querySelector("#board tbody").innerHTML = state.roster.map((n) => {
+    const cells = TESTS.map((t, i) => {
+      const s = status(n, i);
+      let b = `<span class="badge w">대기</span>`;
+      if (s) {
+        const sc = has(s.r.score) ? `${s.r.score}점` : "";
+        const re = s.re ? ` → 재시 ${s.r.retest}점` : "";
+        b = `<span class="badge ${s.pass ? "p" : "f"}">${s.pass ? "통과" : "불통"} <small>${sc}${re}</small></span>`;
+      }
+      return `<td class="cell" data-n="${n}" data-i="${i}" ${edit ? 'tabindex="0" role="button"' : ""}>${b}</td>`;
+    }).join("");
+    return `<tr><td>${n}</td>${cells}</tr>`;
+  }).join("");
+
+  $("summary").innerHTML = TESTS.map((t, i) => {
+    let p = 0, f = 0;
+    state.roster.forEach((n) => { const s = status(n, i); if (s) { if (s.pass) p++; else f++; } });
+    return `<div class="sum"><div class="k">${t.name}</div><div class="v"><span class="p">통과 ${p}</span> · <span class="f">불통 ${f}</span> <span class="n">/ ${state.roster.length}명</span></div></div>`;
+  }).join("");
+
+  $("modeBtn").textContent = edit ? "입력 끝내기" : "입력 모드";
+  $("modeBtn").classList.toggle("on", edit);
+  $("hint").textContent = edit
+    ? "칸을 누르고 점수를 넣으면 기준 점수로 통과 · 불통이 정해집니다. 재시 점수를 넣으면 재시 결과로 바뀝니다."
+    : "불통은 매시 30분 재시 (6:30 · 7:30 · 8:30 · 9:30)";
+}
+
+function openCell(td) {
+  cur = { n: td.dataset.n, i: Number(td.dataset.i) };
+  const r = (state.res[cur.n] || {})[TESTS[cur.i].id] || {};
+  $("dTitle").textContent = cur.n;
+  $("dSub").textContent = TESTS[cur.i].name;
+  $("dCut").textContent = state.cut[cur.i];
+  $("dScore").value = r.score ?? "";
+  $("dRetest").value = r.retest ?? "";
+  $("dlg").hidden = false;
+  $("dScore").focus();
+}
+$("board").addEventListener("click", (e) => {
+  const td = e.target.closest("td.cell");
+  if (edit && td) openCell(td);
+});
+$("board").addEventListener("keydown", (e) => {
+  const td = e.target.closest("td.cell");
+  if (edit && td && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openCell(td); }
+});
+// 시스템 수업일지 오픈메모로 보내는 중계 — 이름 대신 명단 번호만 보낸다
+const RELAY = "https://ntfy.sh/daol105-g9sat-q7k2m9x4v1";
+async function relay(n, i, rec) {
+  const k = DEFAULT_ROSTER.indexOf(n);
+  const body = JSON.stringify({ k: k >= 0 ? k : n, t: i, s: rec ? rec.score : "", r: rec ? rec.retest : "",
+    f: rec ? (rec.force || "") : "", c: state.cut[i], x: rec ? 0 : 1 });
+  try {
+    const res = await fetch(RELAY, { method: "POST", body });
+    $("sync").textContent = res.ok ? `시스템 전송 ✓ ${new Date().toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" })}` : "시스템 전송 실패";
+    $("sync").className = "sync " + (res.ok ? "ok" : "bad");
+  } catch (e) {
+    $("sync").textContent = "시스템 전송 실패 — 인터넷 확인"; $("sync").className = "sync bad";
+  }
+}
+function put(extra) {
+  const id = TESTS[cur.i].id;
+  const rec = { score: $("dScore").value, retest: $("dRetest").value, ...extra };
+  state = { ...state, res: { ...state.res, [cur.n]: { ...(state.res[cur.n] || {}), [id]: rec } } };
+  $("dlg").hidden = true; save(); relay(cur.n, cur.i, rec);
+}
+$("dSave").onclick = () => put({});
+$("dPass").onclick = () => put({ force: "p" });
+$("dFail").onclick = () => put({ force: "f" });
+$("dCancel").onclick = () => { $("dlg").hidden = true; };
+$("dClear").onclick = () => {
+  const id = TESTS[cur.i].id;
+  const mine = { ...(state.res[cur.n] || {}) }; delete mine[id];
+  state = { ...state, res: { ...state.res, [cur.n]: mine } }; $("dlg").hidden = true; save(); relay(cur.n, cur.i, null);
+};
+$("dlg").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); put({}); }
+  if (e.key === "Escape") $("dlg").hidden = true;
+});
+
+const keepAwake = async () => { try { if ("wakeLock" in navigator) await navigator.wakeLock.request("screen"); } catch (e) { /* 허용 안 되면 그대로 */ } };
+$("modeBtn").onclick = () => { edit = !edit; keepAwake(); render(); };
+document.addEventListener("keydown", (e) => {
+  if ((e.key === "e" || e.key === "E") && $("dlg").hidden && $("settings").hidden) { edit = !edit; render(); }
+});
+document.addEventListener("visibilitychange", () => { if (!document.hidden) keepAwake(); });
+
+const applyTheme = (t) => {
+  if (t === "light") document.documentElement.dataset.theme = "light";
+  else delete document.documentElement.dataset.theme;
+  $("themeBtn").textContent = t === "light" ? "어둡게" : "밝게";
+};
+applyTheme(read(KEY + "_theme"));
+$("themeBtn").onclick = () => {
+  const t = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  applyTheme(t); write(KEY + "_theme", t);
+};
+
+$("setBtn").onclick = () => {
+  $("sRoster").value = state.roster.join("\n");
+  $("sCut").value = state.cut.join(", ");
+  resetArmed = false; $("sReset").textContent = "결과 전부 지우기";
+  $("settings").hidden = false;
+};
+$("sCancel").onclick = () => { $("settings").hidden = true; };
+$("sSave").onclick = () => {
+  const roster = $("sRoster").value.split("\n").map((x) => x.trim()).filter(Boolean);
+  const cut = $("sCut").value.split(/[,\s]+/).filter(Boolean).map(Number);
+  state = { ...state, roster, cut: TESTS.map((_, i) => (isNaN(cut[i]) ? 80 : cut[i])) };
+  $("settings").hidden = true; save();
+};
+$("sReset").onclick = () => {
+  if (!resetArmed) { resetArmed = true; $("sReset").textContent = "한 번 더 누르면 지웁니다"; return; }
+  state = { ...state, res: {} }; $("settings").hidden = true; save();
+};
+
+render();
+setInterval(render, 20000);
+</script>
+
+</body>
+</html>
