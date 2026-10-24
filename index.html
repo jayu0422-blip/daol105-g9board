@@ -10,13 +10,13 @@
 /* 레이아웃: 왼쪽 오늘 순서(시각 강조) · 오른쪽 학생별 통과/불통 표 — 프로젝터 거리에서 읽히는 큰 글씨 */
 :root{
   --bg:#0f1b2d; --panel:#16263d; --line:#25395a; --ink:#f3f1ea; --sub:#9fb0c8;
-  --gold:#d9b25f; --on-gold:#14213a; --pass:#2fbf71; --pass-bg:#123a28; --fail:#ff6b6b; --fail-bg:#3d1a1f;
+  --gold:#d9b25f; --on-gold:#14213a; --pass:#2fbf71; --pass-bg:#123a28; --fail:#ff6b6b; --fail-bg:#3d1a1f; --half:#f0b54a; --half-bg:#3b2e12;
   --wait:#6b7f9c; --scrim:rgba(0,0,0,.55);
   color-scheme:dark;
 }
 :root[data-theme="light"]{
   --bg:#f5f2ea; --panel:#ffffff; --line:#dcd3c1; --ink:#1b2a41; --sub:#5f6a7d;
-  --gold:#9a6f1c; --on-gold:#ffffff; --pass:#157a43; --pass-bg:#dcf1e3; --fail:#b9282b; --fail-bg:#f9dede;
+  --gold:#9a6f1c; --on-gold:#ffffff; --pass:#157a43; --pass-bg:#dcf1e3; --fail:#b9282b; --fail-bg:#f9dede; --half:#9a5b00; --half-bg:#fbedcf;
   --wait:#8f98a6; --scrim:rgba(0,0,0,.35);
   color-scheme:light;
 }
@@ -50,7 +50,7 @@ main>section{min-width:0}
 .summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:10px}
 .sum{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .sum .k{font-size:15px;color:var(--sub)}
-.sum .v{font-size:clamp(20px,2.3vw,30px);font-weight:800;margin-top:2px}
+.sum .v{font-size:clamp(16px,1.7vw,24px);font-weight:800;margin-top:2px;line-height:1.35}
 .sum .p{color:var(--pass)} .sum .f{color:var(--fail)} .sum .n{font-size:15px;color:var(--sub);font-weight:600}
 .wrap{overflow-x:auto}
 table{width:100%;border-collapse:separate;border-spacing:0 5px}
@@ -63,6 +63,8 @@ td:last-child{border-right:1px solid var(--line);border-radius:0 10px 10px 0}
 .badge{display:inline-flex;align-items:baseline;gap:6px;min-width:110px;justify-content:center;padding:4px 10px;border-radius:999px;font-weight:800;font-size:clamp(16px,1.7vw,20px)}
 .badge.p{background:var(--pass-bg);color:var(--pass)}
 .badge.f{background:var(--fail-bg);color:var(--fail)}
+.badge.h{background:var(--half-bg);color:var(--half)}
+.sum .h{color:var(--half)}
 .badge.w{color:var(--wait)}
 .badge small{font-weight:600;font-size:14px;opacity:.9}
 table.edit td.cell{cursor:pointer}
@@ -89,6 +91,7 @@ table.only th.c:not(.sel), table.only td.cell:not(.sel){display:none}
 .row button{flex:1;font-size:18px;min-height:50px;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
 .row .ok{background:var(--pass);color:#fff;border:none}
 .row .no{background:var(--fail);color:#fff;border:none}
+.row .half{background:var(--half);color:#1b1205;border:none}
 .row .warn{color:var(--fail)}
 @media (max-width:760px){main{grid-template-columns:1fr}.summary{grid-template-columns:1fr}
   body.editing .panel, body.editing .summary{display:none}
@@ -132,8 +135,9 @@ table.only th.c:not(.sel), table.only td.cell:not(.sel){display:none}
     <label for="dRetest">재시 점수 (있을 때만)</label>
     <input id="dRetest" type="number" inputmode="numeric" min="0" max="100">
     <div class="row">
-      <button class="ok" id="dPass" type="button">통과로 표시</button>
-      <button class="no" id="dFail" type="button">불통으로 표시</button>
+      <button class="ok" id="dPass" type="button">통과</button>
+      <button class="half" id="dHalf" type="button">틀린 문항 재시</button>
+      <button class="no" id="dFail" type="button">전체 재시</button>
     </div>
     <div class="row">
       <button id="dClear" type="button">비우기</button>
@@ -194,14 +198,20 @@ const hm = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; 
 const disp = (s) => { const [h, m] = s.split(":").map(Number); return `${h > 12 ? h - 12 : h}:${String(m).padStart(2, "0")}`; };
 const has = (v) => v !== "" && v != null;
 
+// 원장 기준(10/24): 80점 이상 통과 · 60~79점 틀린 문항만 재시 · 60점 미만 전체 재시
+const FULL_CUT = 60;
+const TIER = { p: "통과", h: "틀린 문항 재시", f: "전체 재시" };
+const tierOf = (score, cut) => (score >= cut ? "p" : score >= FULL_CUT ? "h" : "f");
 function status(name, i) {
   const r = (state.res[name] || {})[TESTS[i].id];
   if (!r) return null;
   const cut = Number(state.cut[i]);
-  if (r.force) return { pass: r.force === "p", r, re: has(r.retest) };
-  if (has(r.retest)) return { pass: Number(r.retest) >= cut, r, re: true };
-  if (has(r.score)) return { pass: Number(r.score) >= cut, r };
-  return null;
+  let tier = null;
+  if (r.force) tier = r.force === "p" ? "p" : (r.force === "h" ? "h" : "f");
+  else if (has(r.retest)) tier = tierOf(Number(r.retest), cut);
+  else if (has(r.score)) tier = tierOf(Number(r.score), cut);
+  if (!tier) return null;
+  return { tier, pass: tier === "p", r, re: has(r.retest) };
 }
 
 function badge(n, i, short) {
@@ -209,7 +219,7 @@ function badge(n, i, short) {
   if (!s) return `<span class="badge w">${short ? "—" : "대기"}</span>`;
   const sc = has(s.r.score) ? `${s.r.score}점` : "";
   const re = s.re ? ` → 재시 ${s.r.retest}점` : "";
-  return `<span class="badge ${s.pass ? "p" : "f"}">${s.pass ? "통과" : "불통"}${short ? "" : ` <small>${sc}${re}</small>`}</span>`;
+  return `<span class="badge ${s.tier}">${TIER[s.tier]}${short ? "" : ` <small>${sc}${re}</small>`}</span>`;
 }
 
 function renderClock() {
@@ -260,15 +270,16 @@ function render() {
 function renderSummary() {
   $("summary").innerHTML = TESTS.map((t, i) => {
     let p = 0, f = 0;
-    state.roster.forEach((n) => { const s = status(n, i); if (s) { if (s.pass) p++; else f++; } });
-    return `<div class="sum"><div class="k">${t.name}</div><div class="v"><span class="p">통과 ${p}</span> · <span class="f">불통 ${f}</span> <span class="n">/ ${state.roster.length}명</span></div></div>`;
+    let h = 0;
+    state.roster.forEach((n) => { const s = status(n, i); if (s) { if (s.tier === "p") p++; else if (s.tier === "h") h++; else f++; } });
+    return `<div class="sum"><div class="k">${t.name}</div><div class="v"><span class="p">통과 ${p}</span> · <span class="h">틀린 문항 재시 ${h}</span> · <span class="f">전체 재시 ${f}</span> <span class="n">/ ${state.roster.length}명</span></div></div>`;
   }).join("");
 
   $("modeBtn").textContent = edit ? "입력 끝내기" : "입력 모드";
   $("modeBtn").classList.toggle("on", edit);
   $("hint").textContent = edit
-    ? "점수 칸에 숫자를 넣으면 바로 통과 · 불통이 뜹니다. 재시를 보면 「재시」 칸에 넣습니다. 통과 · 불통 표시를 누르면 직접 바꿀 수 있습니다."
-    : "불통은 매시 30분 재시 (8:30 · 9:30)";
+    ? "점수를 넣으면 바로 뜹니다 — 80점 이상 통과 · 60~79점 틀린 문항 재시 · 60점 미만 전체 재시. 재시 점수는 「재시」 칸에, 판정 표시를 누르면 직접 바꿀 수 있습니다."
+    : "80점 이상 통과 · 60~79점 틀린 문항만 재시 · 60점 미만 전체 재시 — 재시는 매시 30분 (8:30 · 9:30)";
 }
 
 // 표 안에서 바로 입력 — 칸을 다시 그리지 않아 다음 칸으로 넘어가도 입력이 끊기지 않는다
@@ -322,7 +333,8 @@ const RELAY = "https://ntfy.sh/daol105-g9sat-q7k2m9x4v1";
 async function relay(n, i, rec) {
   const k = DEFAULT_ROSTER.indexOf(n);
   const body = JSON.stringify({ k: k >= 0 ? k : n, id: TESTS[i].id, s: rec ? rec.score : "", r: rec ? rec.retest : "",
-    f: rec ? (rec.force || "") : "", c: state.cut[i], x: rec ? 0 : 1 });
+    f: rec ? (rec.force || "") : "", c: state.cut[i], x: rec ? 0 : 1,
+    v: rec && status(n, i) ? TIER[status(n, i).tier] : "" });
   try {
     const res = await fetch(RELAY, { method: "POST", body });
     $("sync").textContent = res.ok ? `시스템 전송 ✓ ${new Date().toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" })}` : "시스템 전송 실패";
@@ -378,6 +390,7 @@ function put(extra) {
 $("dSave").onclick = () => put({});
 $("dPass").onclick = () => put({ force: "p" });
 $("dFail").onclick = () => put({ force: "f" });
+$("dHalf").onclick = () => put({ force: "h" });
 $("dCancel").onclick = () => { $("dlg").hidden = true; };
 $("dClear").onclick = () => {
   const id = TESTS[cur.i].id;
