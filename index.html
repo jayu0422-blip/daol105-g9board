@@ -210,6 +210,27 @@ const tierOf = (score, cut) => (score >= cut ? "p" : score >= FULL_CUT ? "h" : "
 const uid = Math.random().toString(36).slice(2, 10);
 
 let state = load() || { roster: DEFAULT_ROSTER, cut: [80, 80, 80], res: {}, resetAt: 0 };
+// 이전 판(v2)에서 이 기기에 넣어 둔 결과를 옮겨 온다 — 새로고침해도 수업 중 입력이 사라지지 않게
+const migrated = [];
+if (!read(KEY)) {
+  try {
+    const old = JSON.parse(read("daol105_g9_sat_20261024_v2") || "null");
+    if (old && old.res) {
+      const now = Date.now();
+      const res = {};
+      Object.entries(old.res).forEach(([n, tests]) => {
+        res[n] = {};
+        Object.entries(tests || {}).forEach(([id, r]) => {
+          if (!r || (!has(r.score) && !has(r.retest) && !r.force)) return;
+          res[n][id] = { score: r.score ?? "", retest: r.retest ?? "", force: r.force || undefined, ts: now };
+          if (!res[n][id].force) delete res[n][id].force;
+          migrated.push([n, id]);
+        });
+      });
+      state = { ...state, res, roster: old.roster || state.roster, cut: old.cut || state.cut };
+    }
+  } catch (e) { /* 옛 기록이 없거나 깨졌으면 새로 시작 */ }
+}
 let edit = false;
 let cur = null;
 let resetArmed = false;
@@ -536,6 +557,11 @@ $("cClose").onclick = () => { $("copyBox").hidden = true; };
 render();
 setInterval(() => { if (edit) { renderClock(); } else render(); }, 20000);
 connect();
+// 옮겨 온 결과는 시스템 · 다른 기기로 한 칸씩 천천히 다시 보낸다(요청 제한에 걸리지 않게)
+if (migrated.length) {
+  save();
+  migrated.forEach(([n, id], j) => setTimeout(() => send(n, TESTS.findIndex((t) => t.id === id)), 1500 * (j + 1)));
+}
 </script>
 
 </body>
