@@ -155,7 +155,9 @@ table.only th.c:not(.sel), table.only td.cell:not(.sel){display:none}
     <h3 id="sTitle">설정</h3>
     <label for="sRoster">학생 명단 (한 줄에 한 명)</label>
     <textarea id="sRoster"></textarea>
-    <label for="sCut">통과 기준 점수 — 워크북1 · 워크북2 · 영작</label>
+    <label for="sMax">만점(원점수) — 워크북1 · 워크북2 · 영작</label>
+    <input id="sMax" type="text">
+    <label for="sCut">통과 기준 점수(100점 환산) — 워크북1 · 워크북2 · 영작</label>
     <input id="sCut" type="text">
     <div class="row">
       <button class="warn" id="sReset" type="button">결과 전부 지우기</button>
@@ -178,10 +180,12 @@ table.only th.c:not(.sel), table.only td.cell:not(.sel){display:none}
 const KEY = "daol105_g9_sat_20261024_v3";
 // 연동 통로 — ntfy.sh 가 학원 인터넷에서 막혀(10/24 17시) 다른 공개 서버로 옮겼다
 const RELAY = "https://ntfy.envs.net/daol105-g9sat-r8w3n6t2";
+// 만점 — 인쇄본(동아윤 7과) 총점: 워크북1 331 · 워크북2 92 · 영작 117 (2026-10-24 확인).
+// 원점수를 넣으면 100점으로 환산해 판정한다(80 이상 통과 · 60~79 틀린 문항 재시 · 60 미만 전체 재시).
 const TESTS = [
-  { id: "wb1", name: "7과 워크북1 TEST" },
-  { id: "wb2", name: "7과 워크북2 TEST" },
-  { id: "eng", name: "7과 영작 TEST" },
+  { id: "wb1", name: "7과 워크북1 TEST", max: 331 },
+  { id: "wb2", name: "7과 워크북2 TEST", max: 92 },
+  { id: "eng", name: "7과 영작 TEST", max: 117 },
 ];
 const TIMELINE = [
   ["16:00", "17:00", "7과 워크북1 TEST", "1시간"],
@@ -204,12 +208,17 @@ const write = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* 저
 const load = () => { try { return JSON.parse(read(KEY)) || null; } catch (e) { return null; } };
 const has = (v) => v !== "" && v != null;
 const isInt = (v) => /^\d{1,3}$/.test(String(v ?? "").trim());
-const okScore = (v) => isInt(v) && Number(v) <= 100;
+const okScore = (v, max = 100) => isInt(v) && Number(v) <= max;
+const pct = (raw, max) => (Number(raw) * 100) / max;                 // 100점 환산(판정은 소수까지 그대로)
+const p1 = (x) => String(Math.floor(x * 10) / 10);                  // 화면 표시 — 소수 한 자리, 올리지 않는다
+const maxOf = (i) => Number((state.max || [])[i]) || TESTS[i].max;  // 지금 설정된 만점
+const recMax = (r) => Number(r && r.m) || 100;                      // 그 칸을 넣을 때의 만점(옛 기록은 100점 기준)
 const num = (v) => String(Number(v));               // 「007」 → 「7」
 const tierOf = (score, cut) => (score >= cut ? "p" : score >= FULL_CUT ? "h" : "f");
 const uid = Math.random().toString(36).slice(2, 10);
 
 let state = load() || { roster: DEFAULT_ROSTER, cut: [80, 80, 80], res: {}, resetAt: 0 };
+if (!Array.isArray(state.max)) state = { ...state, max: TESTS.map((t) => t.max) };
 // 이전 판(v2)에서 이 기기에 넣어 둔 결과를 옮겨 온다 — 새로고침해도 수업 중 입력이 사라지지 않게
 const migrated = [];
 if (!read(KEY)) {
@@ -246,11 +255,12 @@ function status(n, i) {
   if (!r) return null;
   const cut = Number(state.cut[i]);
   let first = null;
-  if (has(r.score)) { if (!okScore(r.score)) return { tier: "x", r }; first = tierOf(Number(r.score), cut); }
+  const m = recMax(r);
+  if (has(r.score)) { if (!okScore(r.score, m)) return { tier: "x", r }; first = tierOf(pct(r.score, m), cut); }
   const track = r.force === "p" ? "p" : (r.force === "h" || r.force === "f") ? r.force : first;
   if (!track) return null;
   let tier = track;
-  if (track === "f" && has(r.retest)) tier = !okScore(r.retest) ? "x" : (Number(r.retest) >= cut ? "rp" : "rf");
+  if (track === "f" && has(r.retest)) tier = !okScore(r.retest, m) ? "x" : (pct(r.retest, m) >= cut ? "rp" : "rf");
   if (track === "h" && has(r.fix)) tier = !isInt(r.fix) ? "x" : (Number(r.fix) === 0 ? "rp" : "rf");
   return { tier, first, track, r };
 }
@@ -258,9 +268,10 @@ function status(n, i) {
 function desc(n, i) {
   const s = status(n, i);
   if (!s || s.tier === "x") return "";
-  const r = s.r, parts = [];
-  if (has(r.score)) parts.push(`${num(r.score)}점`);
-  if (s.track === "f" && has(r.retest)) parts.push(`전체 재시 ${num(r.retest)}점`);
+  const r = s.r, parts = [], m = recMax(r);
+  const sc = (v) => (m === 100 ? `${num(v)}점` : `${num(v)}/${m} (${p1(pct(v, m))}점)`);
+  if (has(r.score)) parts.push(sc(r.score));
+  if (s.track === "f" && has(r.retest)) parts.push(`전체 재시 ${sc(r.retest)}`);
   if (s.track === "h" && has(r.fix)) parts.push(Number(r.fix) === 0 ? "틀린 문항 재시 다 맞음" : `틀린 문항 재시 ${num(r.fix)}개 또 틀림`);
   const tail = `${TIER[s.tier]}${r.force ? " (감독 판정)" : ""}`;
   return parts.length ? `${parts.join(" → ")} · ${tail}` : tail;
@@ -304,16 +315,17 @@ function render() {
   renderPick();
   const sel = (i) => (focusI === i ? " sel" : "");
   document.querySelector("#board thead").innerHTML =
-    `<tr><th>이름</th>${TESTS.map((t, i) => `<th class="c${sel(i)}">${t.name}<br><small>${esc(state.cut[i])}점 통과</small></th>`).join("")}</tr>`;
+    `<tr><th>이름</th>${TESTS.map((t, i) => `<th class="c${sel(i)}">${t.name}<br><small>${maxOf(i)}점 만점 · ${Math.ceil(maxOf(i) * Number(state.cut[i]) / 100)}점↑ 통과(${esc(state.cut[i])}점)</small></th>`).join("")}</tr>`;
   $("board").className = (edit ? "edit" : "") + (focusI >= 0 ? " only" : "");
   document.body.classList.toggle("editing", edit);
   document.querySelector("#board tbody").innerHTML = state.roster.map((n, k) => {
     const cells = TESTS.map((t, i) => {
       if (!edit) return `<td class="cell${sel(i)}" data-k="${k}" data-i="${i}">${badge(n, i)}</td>`;
       const r = cellRec(n, i);
+      const mx = maxOf(i);
       const inp = (f, cls, ph, lab) => `<input class="in${cls}" data-k="${k}" data-i="${i}" data-f="${f}" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="${ph}" value="${esc(r[f])}" aria-label="${esc(n)} ${t.name} ${lab}">`;
       return `<td class="cell ed${sel(i)}" data-k="${k}" data-i="${i}"><div class="edrow">` +
-        inp("score", "", "점수", "점수") + inp("retest", " re", "재시점수", "전체 재시 점수") +
+        inp("score", "", `점수/${mx}`, `점수 (${mx}점 만점)`) + inp("retest", " re", `재시/${mx}`, `전체 재시 점수 (${mx}점 만점)`) +
         `<button type="button" class="allok" data-k="${k}" data-i="${i}">다 맞음</button>` +
         inp("fix", " fx", "또 틀림", "틀린 문항 재시에서 또 틀린 개수") +
         `<span class="live" data-k="${k}" data-i="${i}" tabindex="0" role="button" aria-label="${esc(n)} 감독 판정">${badge(n, i, true)}</span></div></td>`;
@@ -357,8 +369,8 @@ function renderSummary() {
   $("modeBtn").textContent = edit ? "입력 끝내기" : "입력 모드";
   $("modeBtn").classList.toggle("on", edit);
   $("hint").textContent = edit
-    ? "본시험 점수를 넣으면 바로 판정됩니다. 전체 재시 → 「재시점수」 칸(기준 점수 이상이면 재시 통과). 틀린 문항 재시 → 다 맞으면 「다 맞음」(재시 통과), 또 틀리면 「또 틀림」에 개수(재시 불통). 판정 표시를 누르면 감독이 직접 정합니다."
-    : "통과 · 60점 이상은 틀린 문항만 재시 · 60점 미만은 전체 재시 — 재시는 매시 30분 (8:30 · 9:30)";
+    ? `점수 칸에는 원점수를 넣습니다(워크북1 ${maxOf(0)} · 워크북2 ${maxOf(1)} · 영작 ${maxOf(2)}점 만점) — 100점으로 환산해 판정합니다. ` + "본시험 점수를 넣으면 바로 판정됩니다. 전체 재시 → 「재시점수」 칸(기준 점수 이상이면 재시 통과). 틀린 문항 재시 → 다 맞으면 「다 맞음」(재시 통과), 또 틀리면 「또 틀림」에 개수(재시 불통). 판정 표시를 누르면 감독이 직접 정합니다."
+    : "100점 환산 80점 이상 통과 · 60~79점은 틀린 문항만 재시 · 60점 미만은 전체 재시 — 재시는 매시 30분 (8:30 · 9:30)";
 }
 
 // ── 입력 ──
@@ -370,6 +382,7 @@ document.addEventListener("input", (e) => {
   const { n, i } = cellOf(el);
   const before = status(n, i);
   const rec = { ...cellRec(n, i), [el.dataset.f]: el.value, ts: Date.now() };
+  if (el.dataset.f === "score" || (el.dataset.f === "retest" && !has(rec.score))) rec.m = maxOf(i);   // 재시는 본시험을 넣을 때의 만점을 따른다
   if (el.dataset.f === "score") {
     delete rec.force;                                          // 점수를 다시 넣으면 감독 판정은 풀린다
     setRec(n, i, rec);
@@ -436,12 +449,14 @@ async function send(n, i) {
   const k = DEFAULT_ROSTER.indexOf(n);
   if (k < 0) { flash(`${n} 은(는) 기본 명단에 없어 시스템으로 보내지 않습니다`, false); return; }
   const r = cellRec(n, i), s = status(n, i);
-  if (s && s.tier === "x") { flash(`${n} 점수를 확인해 주세요 (0~100)`, false); return; }
+  if (s && s.tier === "x") { flash(`${n} 점수를 확인해 주세요 (0~${recMax(r)})`, false); return; }
+  const m = recMax(r), to100 = (v) => String(Math.floor(pct(v, m)));
   const id = `${uid}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   mine.add(id);
   const msg = { u: id, ts: r.ts || Date.now(), k, id: TESTS[i].id, c: Number(state.cut[i]) || 80,
-    s: s && has(r.score) ? num(r.score) : "", f: s ? (r.force || "") : "",
-    r: s && s.track === "f" && has(r.retest) ? num(r.retest) : "", z: s && s.track === "h" && has(r.fix) ? num(r.fix) : "",
+    s: s && has(r.score) ? to100(r.score) : "", f: s ? (r.force || "") : "",
+    r: s && s.track === "f" && has(r.retest) ? to100(r.retest) : "", z: s && s.track === "h" && has(r.fix) ? num(r.fix) : "",
+    sr: s && has(r.score) ? num(r.score) : "", rr: s && s.track === "f" && has(r.retest) ? num(r.retest) : "", m,
     x: s ? 0 : 1 };
   for (let tries = 0, wait = 3000; tries < 6; tries++, wait *= 2) {
     if ((cellRec(n, i).ts || 0) !== msg.ts) return;           // 그새 더 새 입력이 있으면 옛 값은 보내지 않는다
@@ -460,7 +475,8 @@ function flash(t, ok) { $("sync").textContent = t; $("sync").className = "sync "
 function valid(m) {
   return m && typeof m === "object" && Number.isInteger(m.k) && m.k >= 0 && m.k < DEFAULT_ROSTER.length &&
     TESTS.some((t) => t.id === m.id) && Number.isFinite(m.ts) &&
-    ["", "p", "h", "f"].includes(m.f ?? "") && ["s", "r", "z"].every((f) => (m[f] ?? "") === "" || isInt(m[f]));
+    ["", "p", "h", "f"].includes(m.f ?? "") && ["s", "r", "z", "sr", "rr"].every((f) => (m[f] ?? "") === "" || isInt(m[f])) &&
+    (m.m == null || (Number.isInteger(m.m) && m.m > 0 && m.m < 1000));
 }
 function applyRemote(m) {
   if (!valid(m) || mine.has(m.u) || m.ts < (state.resetAt || 0)) return null;
@@ -468,7 +484,12 @@ function applyRemote(m) {
   if (!state.roster.includes(n)) return null;
   if (m.ts <= (cellRec(n, i).ts || 0)) return null;            // 이 기기에 더 새 값이 있으면 무시
   const rec = { ts: m.ts };
-  if (!m.x) { rec.score = m.s ?? ""; rec.retest = m.r ?? ""; rec.fix = m.z ?? ""; if (m.f) rec.force = m.f; }
+  if (!m.x) {
+    const raw = Number.isInteger(m.m) && m.m !== 100;
+    rec.score = raw ? (m.sr ?? "") : (m.s ?? ""); rec.retest = raw ? (m.rr ?? "") : (m.r ?? ""); rec.fix = m.z ?? "";
+    if (raw) rec.m = m.m;
+    if (m.f) rec.force = m.f;
+  }
   setRec(n, i, rec);
   return [n, i];
 }
@@ -518,6 +539,7 @@ $("themeBtn").onclick = () => {
 $("setBtn").onclick = () => {
   $("sRoster").value = state.roster.join("\n");
   $("sCut").value = state.cut.join(", ");
+  $("sMax").value = TESTS.map((_, i) => maxOf(i)).join(", ");
   resetArmed = false; $("sReset").textContent = "결과 전부 지우기";
   $("settings").hidden = false;
 };
@@ -525,7 +547,9 @@ $("sCancel").onclick = () => { $("settings").hidden = true; };
 $("sSave").onclick = () => {
   const roster = $("sRoster").value.split("\n").map((x) => x.trim()).filter(Boolean);
   const cut = $("sCut").value.split(/[,\s]+/).filter(Boolean).map(Number);
-  state = { ...state, roster, cut: TESTS.map((_, i) => (isNaN(cut[i]) ? 80 : cut[i])) };
+  const mx = $("sMax").value.split(/[,\s]+/).filter(Boolean).map(Number);
+  state = { ...state, roster, cut: TESTS.map((_, i) => (isNaN(cut[i]) ? 80 : cut[i])),
+    max: TESTS.map((t, i) => (Number.isInteger(mx[i]) && mx[i] > 0 && mx[i] < 1000 ? mx[i] : t.max)) };
   $("settings").hidden = true; save(); render();
 };
 $("sReset").onclick = () => {
