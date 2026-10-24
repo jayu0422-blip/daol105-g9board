@@ -68,6 +68,11 @@ td:last-child{border-right:1px solid var(--line);border-radius:0 10px 10px 0}
 table.edit td.cell{cursor:pointer}
 table.edit td.cell:hover{outline:2px solid var(--gold);outline-offset:-2px}
 .hint{color:var(--sub);font-size:15px;margin-top:6px}
+.edrow{display:flex;gap:6px;align-items:center;justify-content:center}
+.edrow .in{width:4.2em;font-size:22px;padding:6px 6px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);text-align:center;font-family:inherit;min-height:44px}
+.edrow .in.re{width:3.8em;font-size:18px}
+.edrow .live{cursor:pointer}
+.edrow .badge{min-width:76px}
 /* 입력 창 (페이지 안에 그리는 창 — 알림창은 쓰지 않는다) */
 .modal{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
 .card{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:16px;padding:20px;width:min(440px,100%)}
@@ -136,7 +141,7 @@ table.edit td.cell:hover{outline:2px solid var(--gold);outline-offset:-2px}
     <h3 id="sTitle">설정</h3>
     <label for="sRoster">학생 명단 (한 줄에 한 명)</label>
     <textarea id="sRoster"></textarea>
-    <label for="sCut">통과 기준 점수 — 영작 · 워크북1 · 워크북2</label>
+    <label for="sCut">통과 기준 점수 — 워크북1 · 워크북2 · 영작</label>
     <input id="sCut" type="text">
     <div class="row">
       <button class="warn" id="sReset" type="button">결과 전부 지우기</button>
@@ -147,20 +152,18 @@ table.edit td.cell:hover{outline:2px solid var(--gold);outline-offset:-2px}
 </div>
 
 <script>
-const KEY = "daol105_g9_sat_20261024";
+const KEY = "daol105_g9_sat_20261024_v2";
 const TESTS = [
-  { id: "eng", name: "7과 영작 TEST" },
   { id: "wb1", name: "7과 워크북1 TEST" },
   { id: "wb2", name: "7과 워크북2 TEST" },
+  { id: "eng", name: "7과 영작 TEST" },
 ];
 const TIMELINE = [
-  ["16:00", "16:20", "7과 영작 TEST", "20분"],
-  ["16:20", "16:40", "7과 워크북1 TEST", "20분"],
-  ["16:40", "17:00", "7과 워크북2 TEST", "20분"],
-  ["17:00", "17:20", "고등서술형 2과 워크북", "변경반 합류"],
-  ["17:20", "18:00", "채점 → 상세해설서 보고 질답", "모르는 문항 질문"],
-  ["18:30", "18:50", "재시", "매시 30분"],
-  ["19:30", "19:50", "재시", "매시 30분"],
+  ["16:00", "17:00", "7과 워크북1 TEST", "1시간"],
+  ["17:00", "18:00", "7과 워크북2 TEST", "1시간"],
+  ["18:00", "19:00", "7과 영작 TEST", "1시간"],
+  ["19:00", "19:20", "고등서술형 2과 워크북", "20분"],
+  ["19:20", "20:00", "채점 → 상세해설서 보고 질답", "모르는 문항 질문"],
   ["20:30", "20:50", "재시", "매시 30분"],
   ["21:30", "21:50", "재시", "매시 30분"],
 ];
@@ -194,34 +197,45 @@ function status(name, i) {
   return null;
 }
 
-function render() {
+function badge(n, i, short) {
+  const s = status(n, i);
+  if (!s) return `<span class="badge w">${short ? "—" : "대기"}</span>`;
+  const sc = has(s.r.score) ? `${s.r.score}점` : "";
+  const re = s.re ? ` → 재시 ${s.r.retest}점` : "";
+  return `<span class="badge ${s.pass ? "p" : "f"}">${s.pass ? "통과" : "불통"}${short ? "" : ` <small>${sc}${re}</small>`}</span>`;
+}
+
+function renderClock() {
   const now = new Date();
   const mins = now.getHours() * 60 + now.getMinutes();
   $("clock").textContent = now.toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" });
   $("date").textContent = now.toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" });
-
   $("tl").innerHTML = TIMELINE.map(([a, b, t, n]) => {
     const cls = mins >= hm(b) ? "done" : (mins >= hm(a) ? "now" : "");
     return `<li class="${cls}"><span class="t">${disp(a)}</span><span>${t}<small>${disp(a)}~${disp(b)} · ${n}</small></span></li>`;
   }).join("");
+}
 
+function render() {
+  renderClock();
   document.querySelector("#board thead").innerHTML =
     `<tr><th>이름</th>${TESTS.map((t, i) => `<th>${t.name}<br><small>${state.cut[i]}점 통과</small></th>`).join("")}</tr>`;
   $("board").className = edit ? "edit" : "";
   document.querySelector("#board tbody").innerHTML = state.roster.map((n) => {
     const cells = TESTS.map((t, i) => {
-      const s = status(n, i);
-      let b = `<span class="badge w">대기</span>`;
-      if (s) {
-        const sc = has(s.r.score) ? `${s.r.score}점` : "";
-        const re = s.re ? ` → 재시 ${s.r.retest}점` : "";
-        b = `<span class="badge ${s.pass ? "p" : "f"}">${s.pass ? "통과" : "불통"} <small>${sc}${re}</small></span>`;
-      }
-      return `<td class="cell" data-n="${n}" data-i="${i}" ${edit ? 'tabindex="0" role="button"' : ""}>${b}</td>`;
+      if (!edit) return `<td class="cell" data-n="${n}" data-i="${i}">${badge(n, i)}</td>`;
+      const r = (state.res[n] || {})[t.id] || {};
+      return `<td class="cell ed" data-n="${n}" data-i="${i}"><div class="edrow">` +
+        `<input class="in" data-n="${n}" data-i="${i}" data-f="score" type="number" inputmode="numeric" min="0" max="100" placeholder="점수" value="${r.score ?? ""}" aria-label="${n} ${t.name} 점수">` +
+        `<input class="in re" data-n="${n}" data-i="${i}" data-f="retest" type="number" inputmode="numeric" min="0" max="100" placeholder="재시" value="${r.retest ?? ""}" aria-label="${n} ${t.name} 재시 점수">` +
+        `<span class="live" data-n="${n}" data-i="${i}">${badge(n, i, true)}</span></div></td>`;
     }).join("");
     return `<tr><td>${n}</td>${cells}</tr>`;
   }).join("");
+  renderSummary();
+}
 
+function renderSummary() {
   $("summary").innerHTML = TESTS.map((t, i) => {
     let p = 0, f = 0;
     state.roster.forEach((n) => { const s = status(n, i); if (s) { if (s.pass) p++; else f++; } });
@@ -231,9 +245,36 @@ function render() {
   $("modeBtn").textContent = edit ? "입력 끝내기" : "입력 모드";
   $("modeBtn").classList.toggle("on", edit);
   $("hint").textContent = edit
-    ? "칸을 누르고 점수를 넣으면 기준 점수로 통과 · 불통이 정해집니다. 재시 점수를 넣으면 재시 결과로 바뀝니다."
-    : "불통은 매시 30분 재시 (6:30 · 7:30 · 8:30 · 9:30)";
+    ? "점수 칸에 숫자를 넣으면 바로 통과 · 불통이 뜹니다. 재시를 보면 「재시」 칸에 넣습니다. 통과 · 불통 표시를 누르면 직접 바꿀 수 있습니다."
+    : "불통은 매시 30분 재시 (8:30 · 9:30)";
 }
+
+// 표 안에서 바로 입력 — 칸을 다시 그리지 않아 다음 칸으로 넘어가도 입력이 끊기지 않는다
+function cellRec(n, i) { return { ...((state.res[n] || {})[TESTS[i].id] || {}) }; }
+function setRec(n, i, rec) {
+  state = { ...state, res: { ...state.res, [n]: { ...(state.res[n] || {}), [TESTS[i].id]: rec } } };
+}
+document.addEventListener("input", (e) => {
+  const el = e.target.closest("input.in");
+  if (!el) return;
+  const n = el.dataset.n, i = Number(el.dataset.i);
+  const rec = { ...cellRec(n, i), [el.dataset.f]: el.value };
+  delete rec.force;
+  setRec(n, i, rec);
+  document.querySelector(`.live[data-n="${n}"][data-i="${i}"]`).innerHTML = badge(n, i, true);
+  renderSummary();
+});
+document.addEventListener("change", (e) => {
+  const el = e.target.closest("input.in");
+  if (!el) return;
+  const n = el.dataset.n, i = Number(el.dataset.i);
+  write(KEY, JSON.stringify(state));
+  relay(n, i, cellRec(n, i));
+});
+document.addEventListener("keydown", (e) => {
+  const el = e.target.closest && e.target.closest("input.in");
+  if (el && e.key === "Enter") { e.preventDefault(); el.blur(); }
+});
 
 function openCell(td) {
   cur = { n: td.dataset.n, i: Number(td.dataset.i) };
@@ -247,18 +288,18 @@ function openCell(td) {
   $("dScore").focus();
 }
 $("board").addEventListener("click", (e) => {
-  const td = e.target.closest("td.cell");
-  if (edit && td) openCell(td);
+  const live = e.target.closest(".live");
+  if (edit && live) openCell(live);
 });
 $("board").addEventListener("keydown", (e) => {
-  const td = e.target.closest("td.cell");
-  if (edit && td && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openCell(td); }
+  const live = e.target.closest(".live");
+  if (edit && live && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openCell(live); }
 });
 // 시스템 수업일지 오픈메모로 보내는 중계 — 이름 대신 명단 번호만 보낸다
 const RELAY = "https://ntfy.sh/daol105-g9sat-q7k2m9x4v1";
 async function relay(n, i, rec) {
   const k = DEFAULT_ROSTER.indexOf(n);
-  const body = JSON.stringify({ k: k >= 0 ? k : n, t: i, s: rec ? rec.score : "", r: rec ? rec.retest : "",
+  const body = JSON.stringify({ k: k >= 0 ? k : n, id: TESTS[i].id, s: rec ? rec.score : "", r: rec ? rec.retest : "",
     f: rec ? (rec.force || "") : "", c: state.cut[i], x: rec ? 0 : 1 });
   try {
     const res = await fetch(RELAY, { method: "POST", body });
@@ -325,7 +366,7 @@ $("sReset").onclick = () => {
 };
 
 render();
-setInterval(render, 20000);
+setInterval(() => { if (edit) renderClock(); else render(); }, 20000);
 </script>
 
 </body>
